@@ -9,87 +9,33 @@ const User = require('../../models/user.model');
 const Ticket = require('../../models/ticket.model');
 const UserTicket = require('../../models/usersTicket.model');
 
-
-
-
-/**
- * Load user and append to req.
- */
-function load(req, res, next, id) {
-  User.get(id)
-    .then((user) => {
-      req.user = user; // eslint-disable-line no-param-reassign
-      return next();
-    })
-    .catch(e => next(e));
-}
-
-/**
- * Get user
- * @returns {User}
- */
-function get(req, res) {
-  return res.json(req.user);
-}
-
-
 function create(req, res, next) {
-  let newpassword='';
-  const isExist =  User.findOne({email:req.body.email}, function (err, isExistuser) {
-   //const hash = bcrypt.hashSync(req.body.password, 8);
+  const isExist =  User.findOne({email:req.body.email}).then(isExistuser=>{
     const salt = bcrypt.genSaltSync(10);
     const hash = bcrypt.hashSync(req.body.password, salt);
-   
-   try {
-      if (_.isEmpty(isExistuser)) 
-      {
-
-        
-                  const user = new User(
-                    {
-                    fname: req.body.fname,
-                    lname: req.body.lname,
-                    email: req.body.email,
-                    password: hash,
-                    phone: req.body.phone,
-                    Isadmin: req.body.Isadmin
-                  });
-      
-                user.save()
+      if (_.isEmpty(isExistuser))  {
+                const user = new User(
+                  {
+                  fname: req.body.fname,
+                  lname: req.body.lname,
+                  email: req.body.email,
+                  password: hash,
+                  phone: req.body.phone,
+                  Isadmin: req.body.Isadmin
+                });
+                 user.save()
                   .then(savedUser => res.json(savedUser))
                   .catch(e => next(e));
              }
-          }catch (e){
+         else{
                      res.status(400).json({
                        message: "This User Already Exist"
                      });
-             }
-    
-  }).lean().exec();
+             }  
+  }).catch(e => next(e)); 
 }
 
-/**
- * Update existing user
- * @property {string} req.body.username - The username of user.
- * @property {string} req.body.mobileNumber - The mobileNumber of user.
- * @returns {User}
- */
-function update(req, res, next) {
-  const user = req.user;
-  user.username = req.body.username;
-  user.mobileNumber = req.body.mobileNumber;
 
-  user.save()
-    .then(savedUser => res.json(savedUser))
-    .catch(e => next(e));
-}
-
-/**
- * Get user list.
- * @property {number} req.query.skip - Number of users to be skipped.
- * @property {number} req.query.limit - Limit number of users to be returned.
- * @returns {User[]}
- */
 function list(req, res, next) {
   const { limit = 50, skip = 0 } = req.query;
   User.list({ limit, skip })
@@ -97,23 +43,11 @@ function list(req, res, next) {
     .catch(e => next(e));
 }
 
-/**
- * Delete user.
- * @returns {User}
- */
-function remove(req, res, next) {
-  const user = req.user;
-  user.remove()
-    .then(deletedUser => res.json(deletedUser))
-    .catch(e => next(e));
-}
 
 const login = async (req, res, next) => {
   const { email, password } = req.body;
   const user = await User.findOne({ email: email}).lean().exec();
-  bcrypt.compareSync(email, user.email);
-  //const match = await bcrypt.compare(password, user.password)
-  if (!_.isEmpty(user) && user.password) {
+  if (!_.isEmpty(user) && bcrypt.compareSync(password, user.password)) {
     const date = new Date();
     const payload = {
       id: String(user._id),
@@ -122,14 +56,14 @@ const login = async (req, res, next) => {
     }
     const token = jwt.sign(payload, config.jwtSecret, { expiresIn: '1h' });
     try {
-      await User.findOneAndUpdate({ email: email },{$set:{token:token}}).exec();
+        await User.findOneAndUpdate({ email: email },{$set:{token:token}}).exec();
       }catch (e) {
-        console.error(e,"*********************");
+        console.error(e);
       }
-    const returnObj = {
-      accessToken: token
+        const returnObj = {
+         accessToken: token
     }
-    res.status(200).json(returnObj);
+      res.status(200).json(returnObj);
   } else {
     res.status(400).json({
       message: "MISMATCH"
@@ -137,25 +71,22 @@ const login = async (req, res, next) => {
   }
 }
 
-const ShowTickets = async (req, res, next) => {
- // const user = await User.find({ email: email,password:password }).lean().exec();
-        await Ticket.find(function (err, user) {
-            if (err){
-                console.log(err);
-            }
-            else{
-                if (!_.isEmpty(user)) {
-                  res.status(200).json(user);
-                }
-            }
-        });
+const myTickets = async (req, res, next) => {
+                let myinfo = await  User.findOne({"email":req.user.userId})   
+               UserTicket.find({userId:myinfo.id}).lean().exec().then(doc => {
+                  res.json(doc)})
+                      .catch(err => {
+                        res.status(400).json({
+                          message: "Not found"
+                        });
+                      });   
 }
 
  const PurchaseTickets = async (req, res, next) => {
   var myobj = { userId: req.body.userId, ticketId: req.body.ticketId};
- var loginuser = await UserTicket.findOne({ticketId: req.body.ticketId}).lean().exec();
+ var purchaseticket = await UserTicket.findOne({ticketId: req.body.ticketId}).lean().exec();
  try {
-       if (_.isEmpty(loginuser)) 
+       if (_.isEmpty(purchaseticket)) 
           {
                 await UserTicket.create(myobj,function (err, resp) {
                     if (err){
@@ -167,19 +98,19 @@ const ShowTickets = async (req, res, next) => {
                           var qr_svg = qr.image(stringdata, { type: 'png' });
                           qr_svg.pipe(fs.createWriteStream(`server/TicketCode/ticket-${myobj.ticketId}.png`));
                             var svg_string = qr.imageSync(stringdata, { type: 'png' });  
-                            res.status(200).json({message:"1 document inserted"});
+                            res.status(200).json({message:"Ticket purchased"});
                       }).exec();
                     }
                   });
                 }else
                 {
                       res.status(400).json({
-                        message: "This User Already purchased"
+                        message: "This ticket already purchased"
                       });
                 }
                 }catch (e){
                 res.status(400).json({
-                  message: "This User Already purchase"
+                  message: "This ticket already purchased"
                 });
         }
  }
@@ -187,8 +118,6 @@ const ShowTickets = async (req, res, next) => {
  const deleteTicket = async (req, res, next) => {
   myobj={ticketId: req.body.ticketId};
   var existticket = await UserTicket.findOne({ticketId: req.body.ticketId}).lean().exec();
-//  console.log(existticket);
-   // try{
         if (!_.isEmpty(existticket)) 
            {
                  let result= await UserTicket.remove({ticketId:req.body.ticketId});
@@ -203,15 +132,10 @@ const ShowTickets = async (req, res, next) => {
                          message: "Ticket Not Exist"
                        });
                  }
-           /*  }catch (e){
-              res.status(400).json({
-                message: "This User Already purchase"
-              });
-      } */
                  
  }
 
  
 
 
-module.exports = { load, get, create, update, list, remove,login,ShowTickets,PurchaseTickets,deleteTicket };
+module.exports = {create, list,login,myTickets,PurchaseTickets,deleteTicket };
